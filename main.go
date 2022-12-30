@@ -6,6 +6,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"sync"
 )
 
 type Transfer struct {
@@ -14,7 +15,15 @@ type Transfer struct {
 	ReadyToUpload chan struct{}
 }
 
-var transfers = map[string]*Transfer{}
+type Transfers struct {
+	mu   *sync.Mutex
+	data map[string]*Transfer
+}
+
+var transfers = Transfers{
+	mu:   new(sync.Mutex),
+	data: map[string]*Transfer{},
+}
 
 func main() {
 	http.HandleFunc("/new-id", handleNewId)
@@ -37,8 +46,10 @@ func handleNewId(w http.ResponseWriter, r *http.Request) {
 	id := fmt.Sprintf("%16X", rand.Uint64())
 	id += fmt.Sprintf("%16X", rand.Uint64())
 
-	// FIXME: thread safe
-	transfers[id] = &Transfer{
+	transfers.mu.Lock()
+	defer transfers.mu.Unlock()
+
+	transfers.data[id] = &Transfer{
 		Body:          nil,
 		Finished:      make(chan struct{}),
 		ReadyToUpload: make(chan struct{}),
@@ -61,16 +72,23 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// FIXME: thread safe
-	transfer, ok := transfers[id]
+	transfers.mu.Lock()
+	transfer, ok := transfers.data[id]
+	transfers.mu.Unlock()
 
 	if !ok {
 		http.Error(w, "Unknown id", http.StatusNotFound)
 		return
 	}
 
-	defer close(transfer.Finished)
-	defer delete(transfers, id)
+	defer func() {
+		close(transfer.Finished)
+
+		transfers.mu.Lock()
+		defer transfers.mu.Unlock()
+		delete(transfers.data, id)
+	}()
+
 	<-transfer.ReadyToUpload
 
 	w.Header().Add("Content-Type", "application/octet-stream")
@@ -104,8 +122,9 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// FIXME: thread safe
-	transfer, ok := transfers[id]
+	transfers.mu.Lock()
+	defer transfers.mu.Unlock()
+	transfer, ok := transfers.data[id]
 
 	if !ok {
 		http.Error(w, "Unknown id", http.StatusNotFound)
