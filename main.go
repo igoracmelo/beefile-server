@@ -50,6 +50,7 @@ func handleNewId(w http.ResponseWriter, r *http.Request) {
 func handleDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, r.Method+" "+r.URL.Path, http.StatusBadRequest)
+		return
 	}
 
 	query := r.URL.Query()
@@ -90,8 +91,9 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
+	if r.Method != "POST" {
 		http.Error(w, r.Method+" "+r.URL.Path, http.StatusBadRequest)
+		return
 	}
 
 	query := r.URL.Query()
