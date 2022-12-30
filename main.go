@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"math/rand"
@@ -8,8 +9,9 @@ import (
 )
 
 type Transfer struct {
-	Body  io.ReadCloser
-	Ready chan struct{}
+	Body          io.ReadCloser
+	Finished      chan struct{}
+	ReadyToUpload chan struct{}
 }
 
 func main() {
@@ -22,28 +24,30 @@ func main() {
 		}
 
 		// FIXME: random seed
-		id := fmt.Sprintf("%04X", rand.Uint64())
+		id := fmt.Sprintf("%16X", rand.Uint64())
+		id += fmt.Sprintf("%16X", rand.Uint64())
 
 		// FIXME: thread safe
 		transfers[id] = &Transfer{
-			Body:  nil,
-			Ready: make(chan struct{}),
+			Body:          nil,
+			Finished:      make(chan struct{}),
+			ReadyToUpload: make(chan struct{}),
 		}
 
 		w.Write([]byte(id))
 	})
 
-	http.HandleFunc("/file", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/transfer", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
-		fileId := query.Get("fileId")
+		transferId := query.Get("id")
 
-		if fileId == "" {
+		if transferId == "" {
 			http.Error(w, "Missing fileId parameter", http.StatusBadRequest)
 			return
 		}
 
 		// FIXME: thread safe
-		transfer, ok := transfers[fileId]
+		transfer, ok := transfers[transferId]
 
 		if !ok {
 			http.Error(w, "Unknown fileId", http.StatusBadRequest)
@@ -54,17 +58,29 @@ func main() {
 		if r.Method == "POST" {
 			// FIXME: thread safe
 			transfer.Body = r.Body
-			close(transfer.Ready)
+			close(transfer.ReadyToUpload)
+			<-transfer.Finished
 			return
 		}
 
 		// download
 		if r.Method == "GET" {
-			<-transfer.Ready
+			defer close(transfer.Finished)
+			defer delete(transfers, transferId)
+			<-transfer.ReadyToUpload
 
-			_, err := io.Copy(w, transfer.Body)
+			w.Header().Add("Content-Type", "application/octet-stream")
+			w.Header().Add("Transfer-Encoding", "chunked")
+
+			writer := bufio.NewWriter(w)
+			_, err := io.Copy(writer, transfer.Body)
 			if err != nil {
-				// FIXME: "http: invalid Read on closed Body"
+				http.Error(w, "Failed to download file: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			err = writer.Flush()
+			if err != nil {
 				http.Error(w, "Failed to download file: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
