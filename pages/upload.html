@@ -1,0 +1,43 @@
+<div class="container">
+  <span id="show-id"></span>
+  <input style="display: none" onchange="upload()" type="file" name="" id="file">
+  <button onclick="file.click()">Send a file</button>
+  <button onclick="copyDownloadUrl()">Copy download url</button>
+</div>
+
+<style>
+  .container {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+</style>
+
+<script>
+  let id
+
+  window.onload = async () => {
+    // window.location.replace(window.location.href.split('?')[0])
+    window.history.replaceState({}, document.title, window.location.href.split('?')[0])
+    const res = await fetch('/api/new-id', { method: 'POST' })
+    id = await res.text()
+    // window.location.replace()
+    window.history.replaceState({}, document.title, window.location.href + `?id=${id}`)
+    const showId = document.querySelector("#show-id")
+    showId.innerHTML = `This transfer ID is <b>${id}</b>`
+    // params = new URLSearchParams(window.location.search)
+  }
+
+  const copyDownloadUrl = () => {
+    navigator.clipboard.writeText(window.location.href.replace('/upload', '/download'))
+  }
+
+  const upload = async () => {
+    const el = document.querySelector("#file")
+
+    await fetch('/api/upload?id=' + id, {
+      method: 'POST',
+      body: el.files[0],
+    })
+  }
+</script>

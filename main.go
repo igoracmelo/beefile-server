@@ -10,9 +10,9 @@ import (
 )
 
 type Transfer struct {
-	Body          io.ReadCloser
-	Finished      chan struct{}
-	ReadyToUpload chan struct{}
+	Body        io.ReadCloser
+	Finished    chan struct{}
+	SenderReady chan struct{}
 }
 
 type Transfers struct {
@@ -26,9 +26,16 @@ var transfers = Transfers{
 }
 
 func main() {
-	http.HandleFunc("/new-id", handleNewId)
-	http.HandleFunc("/upload", handleUpload)
+	http.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		http.ServeFile(w, r, "./pages/upload.html")
+	})
+
 	http.HandleFunc("/download", handleDownload)
+
+	http.HandleFunc("/api/new-id", handleNewId)
+	http.HandleFunc("/api/upload", handleUpload)
+	http.HandleFunc("/api/download", handleDownload)
 
 	err := http.ListenAndServe(":1234", nil)
 	if err != nil {
@@ -50,9 +57,9 @@ func handleNewId(w http.ResponseWriter, r *http.Request) {
 	defer transfers.mu.Unlock()
 
 	transfers.data[id] = &Transfer{
-		Body:          nil,
-		Finished:      make(chan struct{}),
-		ReadyToUpload: make(chan struct{}),
+		Body:        nil,
+		Finished:    make(chan struct{}),
+		SenderReady: make(chan struct{}),
 	}
 
 	w.Write([]byte(id))
@@ -85,11 +92,11 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		close(transfer.Finished)
 
 		transfers.mu.Lock()
-		defer transfers.mu.Unlock()
 		delete(transfers.data, id)
+		transfers.mu.Unlock()
 	}()
 
-	<-transfer.ReadyToUpload
+	<-transfer.SenderReady
 
 	w.Header().Add("Content-Type", "application/octet-stream")
 	w.Header().Add("Transfer-Encoding", "chunked")
@@ -123,15 +130,17 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	transfers.mu.Lock()
-	defer transfers.mu.Unlock()
 	transfer, ok := transfers.data[id]
 
 	if !ok {
+		transfers.mu.Unlock()
 		http.Error(w, "Unknown id", http.StatusNotFound)
 		return
 	}
 
 	transfer.Body = r.Body
-	close(transfer.ReadyToUpload)
+	transfers.mu.Unlock()
+
+	close(transfer.SenderReady)
 	<-transfer.Finished
 }
