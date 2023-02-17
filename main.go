@@ -6,6 +6,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"os"
 	"sync"
 )
 
@@ -31,13 +32,17 @@ func main() {
 		http.ServeFile(w, r, "./pages/upload.html")
 	})
 
-	http.HandleFunc("/download", handleDownload)
-
 	http.HandleFunc("/api/new-id", handleNewId)
 	http.HandleFunc("/api/upload", handleUpload)
+	http.HandleFunc("/download", handleDownload)
 	http.HandleFunc("/api/download", handleDownload)
 
-	err := http.ListenAndServe(":1234", nil)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "12345"
+	}
+
+	err := http.ListenAndServe(":"+port, nil)
 	if err != nil {
 		fmt.Println(err.Error())
 	}
